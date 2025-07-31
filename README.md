@@ -52,8 +52,8 @@ This web application provides a real-time, interactive visualization of global e
 **1. Download or clone this repository.**
 
 ```bash
-git clone https://github.com/yourusername/usgs-earthquake-visualization.git
-cd usgs-earthquake-visualization
+git clone https://github.com/ParthaPRay/usgs_earthquake_visualizer.git
+cd usgs_earthquake_visualizer
 ```
 
 **2. Open `index.html` in your web browser.**
