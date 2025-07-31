@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Earthquake Map & Table - User Selectable Time Window</title>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Leaflet + markercluster CSS/JS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.css"/>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.Default.css"/>
+    <style>
+        body { margin:0; padding:0; }
+        #main-header {
+            width:100vw;
+            text-align:center;
+            font-size:1.7em;
+            font-weight:600;
+            padding: 16px 0 8px 0;
+            letter-spacing: 1px;
+            background: #e6f3fa;
+            border-bottom: 2px solid #aad3eb;
+        }
+        #map { height: 97vh; width: 100%; }
+        #control-panel {
+            position: fixed; top: 20px; left: 20px; z-index: 9999;
+            background: rgba(255,255,255,0.98); border-radius: 10px;
+            box-shadow: 0 2px 12px #9999;
+            padding: 12px 18px 12px 18px; min-width: 260px;
+        }
+        #legend {
+            position: fixed; top: 20px; right: 20px; z-index:9999;
+            background: white; border-radius:8px;
+            box-shadow: 1px 3px 12px rgba(40,40,40,0.11);
+            padding: 12px 16px; width: 280px; font-size: 15px;
+            border:2px solid #444;
+        }
+        #eqtable {
+            position: fixed; top: 90px; left: 18px; z-index: 9999;
+            width: 420px; height: 82vh; overflow-y: scroll;
+            background: rgba(255,255,255,0.97);
+            border-radius: 12px;
+            box-shadow: 1px 3px 16px rgba(60,60,60,0.17);
+            border: 2px solid #666;
+            padding: 15px 12px 12px 12px;
+            font-size: 15px;
+        }
+        @media (max-width: 600px) {
+            #eqtable { width: 95vw; left:2vw; }
+            #legend, #control-panel { left:2vw; right:2vw; width:90vw;}
+            #main-header { font-size:1.2em; }
+        }
+        #footer {
+            position: fixed; left:0; bottom:0; width:100vw; z-index:9999;
+            background: rgba(255,255,255,0.95); color: #222; font-size: 16px;
+            text-align: center; border-top: 2px solid #b3b3b3;
+            padding: 5px 0 3px 0; letter-spacing: 1px;
+        }
+        .mag-micro  { background:#b3ecff; }
+        .mag-minor  { background:#99ff99; }
+        .mag-light  { background:#e6ff66; }
+        .mag-moderate { background:#ffe066; }
+        .mag-strong { background:#ffa64d; }
+        .mag-major  { background:#ff4d4d; }
+        .mag-great  { background:#b30000; }
+    </style>
+</head>
+<body>
+    <div id="main-header">
+        USGS (API) Earthquake
+    </div>
+    <div id="control-panel">
+        <label><b>Select time window:</b></label>
+        <select id="hours" onchange="loadEarthquakes()">
+            <option value="0.0833">Last 5 minutes</option>
+            <option value="0.1667">Last 10 minutes</option>
+            <option value="0.25">Last 15 minutes</option>
+            <option value="0.5">Last 30 minutes</option>
+            <option value="0.75">Last 45 minutes</option>
+            <option value="1">Last 1 hour</option>
+            <option value="3">Last 3 hours</option>
+            <option value="6">Last 6 hours</option>
+            <option value="12">Last 12 hours</option>
+            <option value="24" selected>Last 24 hours</option>
+            <option value="48">Last 48 hours</option>
+            <option value="72">Last 72 hours</option>
+            <option value="96">Last 96 hours</option>
+            <option value="168">Last 7 days</option>
+			<option value="360">Last 15 days</option>
+			<option value="720">Last 1 month</option>
+			<option value="2160">Last 3 months</option>
+			<option value="4320">Last 6 months</option>
+			<option value="8760">Last 1 year</option>
+
+        </select>
+        <span style="margin-left:8px; color:#888; font-size:13px;">(auto-updates map and table)</span>
+    </div>
+    <div id="legend"></div>
+    <div id="eqtable"></div>
+    <div id="map"></div>
+    <div id="footer">
+        <b>Developed by Partha Pratim Ray</b> &mdash; <a href="mailto:parthapratimray1986@gmail.com" style="color:#3030a0;">parthapratimray1986@gmail.com</a> &mdash; <span>2025, July, India</span>
+    </div>
+    <!-- JS Libs -->
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet.markercluster/dist/leaflet.markercluster.js"></script>
+    <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+    <script>
+    // ---- Config
+    const ranges = [
+        {min:0, max:2,   color:'#b3ecff', name:'Micro (0-2)', class:'mag-micro'},
+        {min:2, max:3,   color:'#99ff99', name:'Minor (2-3)', class:'mag-minor'},
+        {min:3, max:4,   color:'#e6ff66', name:'Light (3-4)', class:'mag-light'},
+        {min:4, max:5,   color:'#ffe066', name:'Moderate (4-5)', class:'mag-moderate'},
+        {min:5, max:6,   color:'#ffa64d', name:'Strong (5-6)', class:'mag-strong'},
+        {min:6, max:7,   color:'#ff4d4d', name:'Major (6-7)', class:'mag-major'},
+        {min:7, max:10,  color:'#b30000', name:'Great (7+)', class:'mag-great'},
+    ];
+    let map, markerLayer, faultLayer, autoUpdater;
+    function getColor(mag) {
+        for (let r of ranges) if (mag>=r.min && mag<r.max) return r.color;
+        return "#808080";
+    }
+    function getClass(mag) {
+        for (let r of ranges) if (mag>=r.min && mag<r.max) return r.class;
+        return "";
+    }
+    function renderLegend() {
+        let html = `<b style="font-size:17px;">Richter Scale & Map Legend</b><br>`;
+        for (let r of ranges)
+            html += `<div style="margin-bottom:5px;">
+                <span style="background:${r.color};display:inline-block;width:24px;height:16px;margin-right:10px;border-radius:3px;"></span>
+                <b>${r.name}</b>
+            </div>`;
+        html += `<div style="margin-top:5px;">
+            <span style="background:#00ffea;display:inline-block;width:24px;height:16px;margin-right:10px;border-radius:3px;animation:blinker 1s linear infinite;"></span>
+            <b>Blinking: Quake in Last 5 min</b>
+        </div>
+        <div style="margin-top:10px;">
+            <span style="display:inline-block;width:24px;height:5px;background:#800080;vertical-align:middle;margin-right:10px;border-radius:2px;"></span>
+            <b>Purple Line: Fault Lines</b>
+        </div>
+        <style>@keyframes blinker {50% {opacity: 0;}}</style>
+        `;
+        document.getElementById('legend').innerHTML = html;
+    }
+    function renderTable(eq) {
+        let label = document.getElementById('hours').options[document.getElementById('hours').selectedIndex].text;
+        let rows = eq.map(e =>
+            `<tr>
+                <td style="text-align:center;font-weight:bold;" class="${getClass(e.mag)}">${e.mag.toFixed(2)}</td>
+                <td>
+                    <b>${e.place}</b><br>
+                    <span style="font-size:12px;color:#333;">
+                        Time: ${e.timeStr} UTC<br>Depth: ${e.depth.toFixed(1)} km
+                    </span>
+                </td>
+            </tr>`
+        ).join('\n');
+        document.getElementById('eqtable').innerHTML =
+        `<b style="font-size:18px;">&#128200; Earthquakes - ${label}</b>
+        <table style="width:100%;margin-top:10px;border-collapse:collapse;">
+            <thead>
+                <tr style="background:#eee;font-size:15px;">
+                    <th style="padding:4px 6px;border-bottom:1px solid #888;">Magnitude</th>
+                    <th style="padding:4px 6px;border-bottom:1px solid #888;">Location & Details</th>
+                </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+        </table>`;
+    }
+    function renderMap(eq) {
+        if (markerLayer) markerLayer.clearLayers();
+        else markerLayer = L.markerClusterGroup().addTo(map);
+        for (let e of eq) {
+            let c = getColor(e.mag);
+            let popup = `<b>Magnitude:</b> ${e.mag}<br>
+                         <b>Location:</b> ${e.place}<br>
+                         <b>Depth:</b> ${e.depth} km<br>
+                         <b>Time:</b> ${e.timeStr} UTC<br>
+                         <a href="${e.url}" target="_blank">USGS Event Link</a>`;
+            let marker;
+            if (e.recent) {
+                let icon = L.divIcon({html:
+                    `<div style="
+                        background:#00ffea;border-radius:50%;
+                        width:20px;height:20px;opacity:0.75;
+                        border:2px solid #00bbaa;animation:blinker 1s linear infinite;">
+                    </div>
+                    <style>@keyframes blinker {50% {opacity:0;}}</style>`,
+                    iconSize: [24,24]
+                });
+                marker = L.marker([e.lat, e.lon], {icon:icon}).bindPopup(popup).bindTooltip(e.tooltip);
+            } else {
+                marker = L.circleMarker([e.lat, e.lon], {
+                    radius: 3 + 2.5 * e.mag,
+                    color: c, fillColor: c, fillOpacity: 0.7, weight: 1
+                }).bindPopup(popup).bindTooltip(e.tooltip);
+            }
+            markerLayer.addLayer(marker);
+        }
+    }
+    function loadEarthquakes() {
+        let hours = parseFloat(document.getElementById('hours').value);
+        let now = new Date();
+        let start = new Date(now.getTime() - hours*60*60*1000);
+        let startISO = start.toISOString().split('.')[0];
+        let endISO = now.toISOString().split('.')[0];
+        let url = `https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime=${startISO}&endtime=${endISO}&limit=20000`;
+        axios.get(url).then(resp => {
+            let eqs = resp.data.features.map(f=>{
+                let p=f.properties, g=f.geometry, c=g.coordinates, t=p.time;
+                return {
+                    mag:p.mag||0, place:p.place||'Unknown',
+                    lon:c[0], lat:c[1], depth:c[2]||0,
+                    time:t, timeStr:new Date(t).toISOString().replace('T',' ').substring(0,19),
+                    url:p.url||'', recent:((Date.now()-t)<5*60*1000),
+                    tooltip:`M${p.mag} | ${p.place} | ${new Date(t).toISOString().replace('T',' ').substring(0,19)}`
+                }
+            }).sort((a,b)=>b.time-a.time);
+            renderTable(eqs);
+            renderMap(eqs);
+        }).catch(e=>{
+            document.getElementById('eqtable').innerHTML = '<b>Error loading data!</b>';
+        });
+    }
+    // -- Map and Fault Lines
+    window.onload = function() {
+        map = L.map('map').setView([0,0],2);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{
+            attribution:'&copy; <a href="https://carto.com/">CartoDB</a>'
+        }).addTo(map);
+        markerLayer = L.markerClusterGroup().addTo(map);
+        // Fault lines
+        fetch('https://raw.githubusercontent.com/fraxen/tectonicplates/master/GeoJSON/PB2002_boundaries.json')
+        .then(resp=>resp.json()).then(data=>{
+            faultLayer = L.geoJSON(data, {
+                style: {color:'#800080',weight:2.5,opacity:0.8}
+            }).addTo(map);
+        });
+        renderLegend();
+        loadEarthquakes();
+        // --- AUTO-REFRESH EVERY 5 MINUTES (300000 ms) ---
+        autoUpdater = setInterval(loadEarthquakes, 300000);
+    };
+    </script>
+</body>
+</html>
